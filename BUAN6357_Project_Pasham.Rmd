@@ -1,0 +1,911 @@
+---
+title: "Project"
+output:
+  pdf_document: default
+  word_document: default
+---
+
+
+```{r}
+#Load data  
+data<- read.csv("spotify10.csv")
+
+```
+
+```{r}
+#Load required packages
+
+list.of.packages <- c("ggplot2","caret","tinytex","rmarkdown","knitr","e1071","randomForest","sqldf","factoextra","nnet","tidyverse","cluster","fpc","shiny","shinyWidgets","neuralnet")
+new.packages <- list.of.packages[!(list.of.packages %in% installed.packages()[,"Package"])]
+if(length(new.packages)) install.packages(new.packages)
+invisible(lapply(list.of.packages, require, character.only = TRUE))
+```
+
+```{r}
+#Understand the columns and data types 
+head(data)
+str(data)
+
+```
+
+```{r}
+#Remove Char variables to find correlation matrix
+cordata<-data[-1]
+cordata<-cordata[-1]
+cordata<-cordata[-1]
+head(cordata)
+```
+
+```{r}
+#Unique artists 
+length(unique(data$artist))
+unique(data$key)
+
+unique(data$time_signature)
+
+
+
+```
+
+
+```{r}
+
+#Find correlation between variables 
+cor(cordata)
+
+```
+Danceabilty, loudness, acousticness, instrumentalness, valence, sections,time_signature explain the target variable if it's a mainstream hit or a flop song.
+
+key, mode, tempo do not really help the prediction. Once we run a model  to test our hypothesis, we can be sure if there are significant enough to predict the target variable 
+
+```{r}
+#check for null values
+colSums(is.na(data))
+
+```
+No null values 
+
+```{r}
+# To check if the data is balanced 
+table(data$target)
+
+```
+Data is balanced 
+
+```{r}
+#further Analysis 
+
+popularartist<-sqldf("Select artist, Count(track) from data where Target=1 group by artist order by Count(Track) desc limit 10")
+
+popularartist
+
+ ggplot(data=popularartist,aes(x=reorder(artist,-`Count(track)`),y=`Count(track)`)) +
+  geom_bar(stat="identity", fill="pink")+  geom_text(aes(label=`Count(track)`), vjust=1.6,color="black", size=3.5)+
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) + labs(
+   title = 'Artist with maximum number of hit songs from 2010-2019',
+    y = 'count of hit songs', x="Artists") 
+```
+ 
+
+
+```{r}
+
+sqldf("Select artist, Count(track), avg(speechiness), avg(danceability), avg(valence), avg(energy) from data where Target=1 group by artist order by Count(Track) desc limit 10")
+
+```
+
+There is a clear difference is speechiness in hip hop artists such as drake compared to  pop artists such as taylor swift. 
+
+Danceability is relatively high for all the songs on average(above 50), valence(above 35). 
+Energy is also really high on average for all these artist but the correlation value was low for energy. Need to run model to check it's significance.
+
+So we say that Danceability and valence are more significant in predicting target variable than speechiness as there values are in difference ranges so they probabilty don't impact the prediction of a mainstream hit song
+
+
+
+```{r} 
+#Split data into train and test
+
+data1<-cordata
+data1$target<-as.factor(data1$target)
+d <- createDataPartition(data1$target, p=0.75, list=FALSE)
+train <- data1[ d,]
+test <- data1[-d,]
+
+nrow(train)
+nrow(test)
+head(test)
+```
+
+
+``` {r}
+# To Find out significant variables in predicting target variable  
+#GLM
+
+model1<- glm(target~.,data=train,family='binomial')
+summary(model1)
+
+predtest <- predict(model1,newdata =  test,type="response")
+t<-table(predtest > 0.5, test$target) 
+sum(diag(t)) / sum(t)
+
+```
+
+```{r}
+
+sqldf("select avg(danceability),avg(loudness),avg(energy),avg(speechiness),avg(acousticness),avg(instrumentalness),avg(time_signature) from data where Target=1")
+
+```
+All the variables that are highly significant in determining the mainstream hit songs and their average values. 
+
+
+```{r}
+#Models to predict the target variable 
+
+#SVM
+train_control <- trainControl(method="cv", number=10) #k-fold cross validation
+model2<-svm(target~danceability+energy+loudness+acousticness+instrumentalness+valence+tempo+time_signature+duration_ms,data=train,trControl = train_control,set.seed(30))
+
+summary(model2)
+
+predtest <- predict(model2,newdata =  test,type="response")
+table(predtest, test$target) 
+mean(predtest == test$target)
+
+
+```
+
+```{r}
+#Random Forest 
+
+train_control <- trainControl(method="cv", number=10)
+model3<-randomForest(target~danceability+energy+loudness+acousticness+instrumentalness+valence+tempo+time_signature+duration_ms,data=train,trControl = train_control,set.seed(88))
+
+model3
+
+predtest <- predict(model3,newdata = test,type="response")
+table(predtest,test$target) 
+mean(predtest == test$target)
+
+```
+
+
+
+```{r}
+#Clustering to find similar music patterns
+cc<-cordata[-16]
+head(cc)
+
+#For song recommendation
+c<-data.frame(data$danceability,data$energy,data$acousticness,data$instrumentalness,data$valence)
+head(c)
+
+
+```
+
+```{r}
+
+#Elbow Method for finding the optimal number of clusters
+set.seed(40)
+
+#For Clustering 
+clusterdata1<-scale(cc)
+
+wss <- (nrow(clusterdata1)-1)*sum(apply(clusterdata1,2,var))
+  for (i in 2:15) wss[i] <- sum(kmeans(clusterdata1,
+                                       centers=i)$withinss)
+plot(1:15, wss, type="b", xlab="Number of Clusters",
+     ylab="Within groups sum of squares")
+
+#For Song recommendation 
+
+clusterdata11<-scale(c)
+
+wss <- (nrow(clusterdata11)-1)*sum(apply(clusterdata11,2,var))
+  for (i in 2:15) wss[i] <- sum(kmeans(clusterdata11,
+                                       centers=i)$withinss)
+plot(1:15, wss, type="b", xlab="Number of Clusters for recomm",
+     ylab="Within groups sum of squares")
+```
+
+```{r}
+
+set.seed(40)
+
+#For Clustering 
+km1 <- kmeans(cc, 5, nstart = 20)
+aggregate(cc, by=list(cluster=km1$cluster), mean)
+
+set.seed(40)
+#For Song recommendation 
+km2 <- kmeans(c, 4, nstart = 20)
+aggregate(c, by=list(cluster=km2$cluster), mean)
+
+```
+
+
+Cluster 1 has high danceability, energy, medium valence but low acousticness and instrumentalness mostly like mainstream music could have a lot of hits based on previous analysis(Mainstream)
+Cluster 2 is similar to cluster 1 but have  more valence and danceablility and  so this cluster could have more mainstream hits 
+Cluster 3 has low danceability, energy,valence but very high accousticness and instumentalness (mellow music) 
+Cluster 4 is  medium danceability,valence but high energy, instrumentalness and low accousticness (metal like music)
+Cluster 5 medium danceability, energy,valence but high acounsticness and low instrumentalness. (Acoustic Music)
+
+```{r}
+
+#
+
+#plot(km,data=c)
+
+#For Clustering 
+plotcluster(cc,km1$cluster)
+
+#For Song recommendation 
+plotcluster(c,km2$cluster)
+
+```
+
+
+```{r}
+#c$track<-data$track
+#c$artist<-data$artist
+#c$hit<-data$target
+c$clusters<-km2$cluster
+
+km1$size
+km2$size
+
+```
+
+```{r}
+#Split data in test and train 
+data1<-c
+d <- createDataPartition(data1$clusters, p=0.75, list=FALSE)
+train <- data1[ d,]
+test <- data1[-d,]
+
+nrow(train)
+nrow(test)
+head(test)
+
+```
+
+```{r}
+#Multinomial model to predict the clusters
+model <- multinom(clusters ~ ., data = train)
+summary(model)
+
+```
+
+``` {r}
+
+p<-predict(model, newdata = test, "class")
+table(test$clusters, p)
+mean(p == test$clusters)
+
+
+```
+Model Accuracy is 99.31
+
+
+```{r}
+#User Input
+a<-0.5
+data.danceability<-c(a)
+data.energy<-c(0.5)
+data.acousticness<-c(0.5)
+data.instrumentalness<-c(0.5)
+data.valence<-c(0.5)
+x <- data.frame(data.danceability, data.energy, data.acousticness,data.instrumentalness,data.valence)
+x
+cluster<-predict(model, newdata = x, "class")
+cluster
+dataforview<-c
+dataforview$track<-data$track
+dataforview$artist<-data$artist
+dataforview$hit<-data$target
+head(dataforview)
+
+b<-sprintf("select track, artist, hit as Mainstream_Hits from dataforview where clusters= %s order by Mainstream_Hits desc limit 10",cluster)
+
+sqldf(b)
+
+```
+
+```{r}
+#Split data in train/test  
+     cordata$target<-as.factor(cordata$target)
+     d <- createDataPartition(cordata$target, p=0.75, list=FALSE)
+     train <- cordata[ d,]
+      test <- cordata[-d,]
+
+```
+
+
+```{r}
+#UI 
+
+ui <-  fluidPage( 
+  h1("SPOTIFY MUSIC DATA"),
+  setBackgroundColor(color = c("#F0E68C","#BDB76B"),
+                     gradient = "linear"),
+
+  
+ tabsetPanel(
+   
+#TAB 1 
+
+
+ tabPanel("EDA",
+  
+    
+  sidebarLayout(
+   
+    sidebarPanel(
+       selectInput(inputId = "number",
+                      label = " Choose a Number ",
+                      choices  =c(5,10,15,20,25,30)),
+       
+       textOutput("insights"),
+
+      ),
+      
+      mainPanel(
+  
+    tabsetPanel( 
+      #1
+      tabPanel("Popular Artists",           
+        h4("Popular Artists of the Decade"),
+        plotOutput("popular",width = "700px"),
+        tableOutput("avgstat")
+      ),
+   
+     #2
+      tabPanel("Songs per Artist",
+              
+              tableOutput("num")
+  
+              ),
+    
+
+     #3
+      tabPanel("Features Correlation",
+              
+              tableOutput("cor")
+  
+              )
+     
+     
+        
+    )#tabsetPanel
+            )#mainPanel
+          ),#sidebarLayout
+  
+      actionButton("display","Average Statistics of Mainstream Music",
+          style="background-color: #F0E68C"),
+     tableOutput("avg")
+  
+  
+         ),
+
+
+#TAB 2 
+
+   tabPanel("Hits Prediction", 
+          h4("Build Model for Predicting Mainstream Hits"),
+          textOutput("modelinfo"),
+
+          
+  sidebarLayout(
+   
+    sidebarPanel(
+      
+      selectInput(inputId = "variables",
+                      label = " Choose Variables",
+                      choices  =colnames(train),
+                                  selected=c("danceability","energy","loudness","acousticness",
+                                  "instrumentalness","valence","tempo","time_signature","duration_ms"),
+                                multiple=TRUE),
+      
+      
+      ), #sidebarPanel
+    
+    mainPanel(
+      tabsetPanel(
+        #1
+        tabPanel("GLM",
+                verbatimTextOutput("glm"),
+                textOutput("accuracy")
+        ),
+        #2
+        tabPanel("SVM",
+                 verbatimTextOutput("svm"),
+                 textOutput("accuracy1")
+        ),
+        #3
+        tabPanel("RandomForest",
+                 
+                 verbatimTextOutput("rf"),
+                 textOutput("accuracy2")
+                 
+        )
+      
+          )#tabsetPanel
+      
+    )#mainPanel
+  )#sidebarLayout 
+          
+
+          ),
+
+  
+#TAB 3  
+
+    tabPanel("Genres",
+            textOutput("clu"),
+          
+          sidebarLayout(
+   
+    sidebarPanel(
+       selectInput(inputId = "c",
+                      label = " Choose number of Clusters",
+                      choices  =c(2,3,4,5,6,7),
+                                  selected=4),
+       
+       selectInput(inputId = "var",
+                       label = " Choose variables",
+                        choices = colnames(cordata),
+                                   selected=c("danceability","energy","acousticness","instrumentalness","valence"),
+                                   multiple=TRUE),
+       
+       textOutput("clus")
+                               
+    ),#sidebarPanel
+    
+    mainPanel(
+      
+      tabsetPanel(
+        #1
+        tabPanel("Means",
+                tableOutput("summary")
+              #  textOutput("accuracy")
+        ),
+        #2
+        tabPanel("Plot",
+                 plotOutput("clusters")
+        ),
+        #3
+        tabPanel("Model Summary and Accuracy",
+                 
+                 verbatimTextOutput("modelc"),
+                 textOutput("Accuracyc")
+                 
+        ),
+         #4
+        tabPanel("Elbow Method",
+                 
+           plotOutput("elbow")
+              )
+        
+    )#tabsetPanel
+      
+      
+      
+    
+    )#mainPanel
+    )#sidebarLayout
+    
+    
+     ),
+          
+
+#TAB 4 
+   tabPanel("Song Recommendations", 
+          h4(""),
+          
+          
+sidebarLayout(
+   
+    sidebarPanel(
+      
+      textOutput("h"),
+      sliderInput("danceability","Danceability",min = 0.1, max = 1,value = 0.5,step = 0.1 ),
+      sliderInput("energy","Energy",min = 0.1, max = 1,value = 0.5,step = 0.1 ),
+      sliderInput("acousticness","Acousticness",min = 0.1, max = 1,value = 0.5,step = 0.1 ),
+      sliderInput("instrumentalness","Instrumentalness",min = 0.1, max = 1,value = 0.5,step = 0.1 ),
+      sliderInput("valence","Valence",min = 0.1, max = 1,value = 0.5,step = 0.1 )
+
+
+      
+
+      
+                               
+    ),#sidebarPanel
+    
+    mainPanel(
+      
+      numericInput("vvv"," Enter the number of song suggestions required", value = 10, min = 0, max = 50),
+      #selectInput("vvv", "Select a Number",choices  =c(10,15,20,25,30,35,40),
+      #                            selected=10),
+      textOutput("t"),
+      tableOutput("songs")
+      
+          
+    )#mainPanel
+  )#sidebarLayout
+  
+  
+  
+          ),
+ 
+#TAB 5   
+    tabPanel("About", 
+          h4("Content"),
+          textOutput("data"),
+          actionButton("content","Go!",
+          onclick ="window.open('https://www.kaggle.com/theoverman/the-spotify-hit-predictor-dataset')", 
+          style="background-color: #BDB76B"),
+    
+         )
+
+
+
+  )#tabsetPanel
+ 
+  )#fluidPage
+ 
+
+```
+
+
+```{r}
+#Server  
+server <- function(input, output, session){
+  
+  #TAB 1
+  
+  
+###
+  
+  output$num<-renderTable({
+    
+    
+    a<-sprintf("Select artist, Count(track) from data group by artist order by Count(Track) desc limit %s ",input$number)
+ popularartist<-sqldf(a)
+    
+    
+  })
+  
+  
+
+###
+  
+  output$cor<-renderTable({
+    cordata<-data[-1]
+     cordata<-cordata[-1]
+      cordata<-cordata[-1]
+    cor(cordata)
+    
+  })
+  
+  
+###
+  output$insights<-renderText({" The Dataset is balanced. Here you can see a list of popular artist with the maximum number of hit songs in this decade. When you look at the list of songs per artist, you notice that famous artists such as Drake, Taylor swift, etc have all of their songs to be a hit which I believe has to do with their popularity and not just their music.   
+There is a clear difference is speechiness in hip hop artists such as Drake compared to pop artists such as taylor swift. Click on the button below to get the average stats of mainstream hit music"})
+  
+  
+###
+  observeEvent(input$display,{
+    output$avg<- renderTable({
+      
+      l<-sqldf("select avg(danceability),avg(energy),avg(speechiness),avg(acousticness),avg(instrumentalness),avg(time_signature) from data where Target=1")
+      print(l)
+    })
+   
+  })  
+  
+ 
+###
+output$popular<-renderPlot({
+      
+a<-sprintf("Select artist, Count(track) from data where Target=1 group by artist order by Count(Track) desc limit %s ",input$number)
+ popularartist<-sqldf(a)
+
+ ggplot(data=popularartist,aes(x=reorder(artist,-`Count(track)`),y=`Count(track)`)) +
+  geom_bar(stat="identity", fill="#BDB76B")+  geom_text(aes(label=`Count(track)`), vjust=1.6,color="black", size=3.5)+
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) + labs(
+   title = 'Artist with maximum number of hit songs from 2010-2019',
+    y = 'count of hit songs', x="Artists") 
+  
+
+}) 
+
+###
+   
+  output$avgstat<- renderTable({
+    
+    b<-sprintf("Select artist, Count(track), avg(speechiness), avg(danceability), avg(valence), avg(energy) from data where Target=1 group by artist order by Count(Track) desc limit %s ",input$number)
+    c<-sqldf(b)
+      
+      print(c)
+         })  
+    
+#TAB 2  
+  
+  output$modelinfo<-renderText({ "The goal is to predict if a track is going to be a mainstream hit or flop given it's features. Looking at the GLM model we can tell which variables are significant in predicting the target variable. I've build svm and randomforest model using these significant variables as the independent variables and displayed the accuracy of all the models. The highest accuracy achieved is around 85% using k-fold cross validation with Randomforest model. Note: Models may take up to 6 seconds to load. Thank you for your patience."
+    })
+  
+###
+  output$glm<-renderPrint({
+ 
+    predictors = paste(input$variables,collapse="+")
+    fml = as.formula(sprintf('target ~ %s', predictors ))
+    model1 = glm(fml, data=train,family=binomial())
+     
+    summary(model1)
+     
+  })
+
+###   
+  output$accuracy<-renderText({
+    
+    
+    predictors = paste(input$variables,collapse="+")
+    fml = as.formula(sprintf('target ~ %s', predictors ))
+    model1 = glm(fml, data=train,family=binomial())
+    
+    
+    predtest <- predict(model1,newdata =  test,type="response")
+    t<-table(predtest > 0.5, test$target) 
+    e<-sum(diag(t)) / sum(t)
+    sprintf("Accuracy of the model is %s",e)
+
+  })
+  
+###
+     output$svm<-renderPrint({
+   
+    train_control <- trainControl(method="cv", number=10) #k-fold cross validation
+       
+    predictors = paste(input$variables,collapse="+")
+    fml = as.formula(sprintf('target ~ %s', predictors ))
+       
+    model2<-svm(fml,data=train,trControl = train_control,set.seed(30))
+    summary(model2)
+    
+  })
+  
+### 
+  output$accuracy1<- renderText({
+    
+    
+      train_control <- trainControl(method="cv", number=10) #k-fold cross validation
+       
+    predictors = paste(input$variables,collapse="+")
+    fml = as.formula(sprintf('target ~ %s', predictors ))
+       
+    model2<-svm(fml,data=train,trControl = train_control,set.seed(30))
+
+      predtest <- predict(model2,newdata =  test,type="response")
+     # table(predtest, test$target) 
+     x<- mean(predtest == test$target)
+      sprintf("Accuracy of the model is %s",x)
+      
+      
+    })
+    
+###
+  
+   output$rf<-renderPrint({
+   
+    train_control <- trainControl(method="cv", number=10) #k-fold cross validation
+       
+    predictors = paste(input$variables,collapse="+")
+    fml = as.formula(sprintf('target ~ %s', predictors ))
+       
+    model3<-randomForest(fml,data=train,trControl = train_control,set.seed(30))
+    model3
+    
+  })
+  
+###
+   
+   output$accuracy2<- renderText({
+    
+    
+      train_control <- trainControl(method="cv", number=10) #k-fold cross validation
+       
+    predictors = paste(input$variables,collapse="+")
+    fml = as.formula(sprintf('target ~ %s', predictors ))
+       
+    model3<-randomForest(fml,data=train,trControl = train_control,set.seed(20))
+
+      predtest <- predict(model3,newdata =  test,type="response")
+     # table(predtest, test$target) 
+     x<- mean(predtest == test$target)
+      sprintf("Accuracy of the model is %s",x)
+      
+      
+    })
+   
+   
+#TAB 3 
+   
+###
+  output$clu<-renderText({"Here you can find similar music patterns where you can select the optimal number of clusters with the help of the elbow method and select the variables that are important to you. You can view the plot, model summary, accuracy and eblow method that change based on the clusters and variables selected by you. Note: Might take upto 7 seconds to load."})
+   
+   
+   output$clus<-renderText({"The variables I've selected our danceability, energy, acousticness, instrumentalness and valence. The ideal number of clusters are 4.  Cluster 1 has medium danceability, energy,valence but high acounsticness and low instrumentalness. (Acoustic Music). Cluster 2 has low danceability, energy, valence but very high accousticness and instumentalness (mellow music).Cluster 3 has medium danceability,valence but high energy, instrumentalness and low accousticness (metal music).Cluster 4 has high danceability, energy, medium valence but low acousticness and instrumentalness like mainstream music so could have a lot of hits based on previous analysis. Achieved an accuracy of 99.7%"})
+   
+###   
+  output$summary<-renderTable({ 
+  
+  c<-cordata[,c(input$var)]
+   set.seed(40)
+  km2 <- kmeans(c, input$c , nstart = 20)
+  a<-aggregate(c, by=list(cluster=km2$cluster), mean)
+  print(a)
+
+})
+
+###
+
+  output$clusters<- renderPlot({
+    
+    c<-cordata[,c(input$var)]
+    set.seed(40)
+    km2 <- kmeans(c, input$c , nstart = 20)
+    
+    plotcluster(c,km2$cluster)
+
+    })
+
+
+###
+
+  output$elbow<- renderPlot({
+    
+     c<-cordata[,c(input$var)]
+    set.seed(40)
+    km2 <- kmeans(c, input$c , nstart = 20)
+    plotcluster(c,km2$cluster)
+   
+   clusterdata11<-scale(c)
+
+  wss <- (nrow(clusterdata1)-1)*sum(apply(clusterdata11,2,var))
+    for (i in 2:15) wss[i] <- sum(kmeans(clusterdata11,
+                                       centers=i)$withinss)
+  plot(1:15, wss, type="b", xlab="Number of Clusters",
+       ylab="Within groups sum of squares")
+  
+})
+  
+  
+###
+   output$modelc<-renderPrint({
+     
+   c<-cordata[,c(input$var)]
+   set.seed(40)
+   km2 <- kmeans(c, input$c , nstart = 20)
+   c$clusters<-km2$cluster
+   
+   data1<-c
+   d <- createDataPartition(data1$clusters, p=0.75, list=FALSE)
+   train <- data1[ d,]
+   test <- data1[-d,]
+
+
+   model <- multinom(clusters ~ ., data = train)
+     summary(model)
+
+
+     
+     
+   })
+  
+###
+   output$Accuracyc<-renderText({
+     
+     c<-cordata[,c(input$var)]
+   set.seed(40)
+   km2 <- kmeans(c, input$c , nstart = 20)
+    c$clusters<-km2$cluster
+    
+    data1<-c
+    d <- createDataPartition(data1$clusters, p=0.75, list=FALSE)
+    train <- data1[ d,]
+    test <- data1[-d,]
+     
+     model <- multinom(clusters ~ ., data = train)
+
+     p<-predict(model, newdata = test, "class")
+     table(test$clusters, p)
+     x<-mean(p == test$clusters)
+     
+     sprintf("Accuracy of the model is %s",x)
+     
+   })
+  
+  
+  
+#TAB 4
+
+###
+output$h<-renderText({"Select a value for each based on your mood"})
+      
+###
+
+output$t<-renderText({"These are a list of tracks that you might like"})
+   
+   
+### 
+output$songs<-renderTable({
+     
+     
+    data.danceability<-c(input$danceability)
+    data.energy<-c(input$energy)
+    data.acousticness<-c(input$acousticness)
+    data.instrumentalness<-c(input$instrumentalness)
+    data.valence<-c(input$valence)
+    
+    c<-data.frame(data$danceability,data$energy,data$acousticness,data$instrumentalness,data$valence)
+    km <- kmeans(c, 6, nstart = 20)
+    c$clusters<-km$cluster
+    
+    data1<-c
+    d <- createDataPartition(data1$clusters, p=0.75, list=FALSE)
+    train <- data1[ d,]
+    test <- data1[-d,]
+    
+    model <- multinom(clusters ~ ., data = train)
+    
+    x <- data.frame(data.danceability, data.energy, data.acousticness,data.instrumentalness,data.valence)
+    x
+    cluster<-predict(model, newdata = x, "class")
+    dataforview<-c
+    dataforview$track<-data$track
+    dataforview$artist<-data$artist
+    dataforview$hit<-data$target
+    head(dataforview)
+    a<-input$vvv
+    b<-sprintf("select track, artist, hit as Mainstream_Hits from dataforview where clusters= %s order by Mainstream_Hits desc limit %s",cluster,a)
+
+    a<-sqldf(b)
+    print(a)
+    
+    
+   })
+   
+   
+   
+   
+   
+  
+  
+#TAB 5 
+  
+  
+  output$data<-renderText({"This is a dataset consisting of features for tracks fetched using Spotify's Web API. This is for the 10s. Starting from Jan 1st, 2010, ending at Dec 31st, 2019.Click on the button below to visit the source and get an understanding of the features."})
+  
+  
+  
+  
+
+}
+   
+```
+
+```{r}
+
+#App
+shinyApp(ui,server)
+
+```
+
+
+```{r}
+
+```
+
+
+
+
