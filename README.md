@@ -9,7 +9,7 @@ Predicted mainstream hit music based on song features using an ensemble learning
 ![image](https://user-images.githubusercontent.com/78705262/111700702-c3705680-8807-11eb-98c6-849e28ab8431.png)
 
 
-Packages Used : ggplot2, caret, tinytex, rmarkdown, knitr, e1071, randomForest, sqldf, factoextra ,nnet , tidyverse, cluster, fpc, shiny, shinyWidgets, neuralnet)
+Packages Used : ggplot2, caret, tinytex, rmarkdown, knitr, e1071, randomForest, sqldf, factoextra ,nnet , tidyverse, cluster, fpc, shiny, shinyWidgets, neuralnet
 
 Data Source: https://www.kaggle.com/yamaerenay/spotify-dataset-19212020-160k-tracks
 
